@@ -1,0 +1,25 @@
+[package]
+name = "pingpongkong-k8s-agent"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# Web Server (Axum) & Async Runtime (Tokio)
+axum = "0.8.9"
+tokio = { version = "1.36", features = ["full"] }
+
+# Serialization (Parsing your YAML ConfigMap)
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
+
+# Kubernetes API (To convert those "roles" into real IP addresses)
+kube = { version = "0.90", features = ["runtime", "derive"] }
+k8s-openapi = { version = "0.21", features = ["v1_29"] }
+
+# Metrics & State Sharing
+prometheus = "0.13"
+lazy_static = "1.4"
+
+anyhow = "1.0"
+surge-ping = "0.8"
+futures = "0.3" # For join_all
