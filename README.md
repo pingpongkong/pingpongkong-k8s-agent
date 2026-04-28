@@ -146,6 +146,8 @@ and pod security policy.
 
 ## Build
 
+Requires Rust `1.88` or newer.
+
 ```bash
 cargo build --release --locked
 ```
