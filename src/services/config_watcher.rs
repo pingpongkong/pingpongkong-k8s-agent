@@ -22,6 +22,7 @@ pub async fn run_config_watcher(
     let configmaps: Api<ConfigMap> = Api::namespaced(client.clone(), &options.namespace);
     let watcher_config =
         WatcherConfig::default().fields(&format!("metadata.name={}", options.name));
+    log_initial_configmap_state(&configmaps, &options, &tasks, &cache).await;
 
     loop {
         let mut stream = watcher(configmaps.clone(), watcher_config.clone()).boxed();
@@ -39,10 +40,11 @@ pub async fn run_config_watcher(
                     apply_configmap_update(&client, &options, &configmap, &tasks, &cache).await;
                 }
                 Ok(Event::Delete(_)) => {
+                    clear_probe_state(&tasks, &cache).await;
                     warn!(
                         namespace = %options.namespace,
                         config_map = %options.name,
-                        "desired-state ConfigMap was deleted; keeping last good task set"
+                        "desired-state ConfigMap was deleted; cleared probe tasks and paused probing"
                     );
                 }
                 Ok(Event::Init | Event::InitDone) => {}
@@ -62,7 +64,7 @@ pub async fn run_config_watcher(
     }
 }
 
-/// Applies a ConfigMap update while preserving the last good task set on failures.
+/// Applies a ConfigMap update and pauses probing when the desired state is unusable.
 async fn apply_configmap_update(
     client: &Client,
     options: &ConfigMapWatchOptions,
@@ -71,12 +73,13 @@ async fn apply_configmap_update(
     cache: &SharedCache,
 ) {
     if let Err(err) = reconcile_configmap(client, options, configmap, tasks, cache).await {
+        clear_probe_state(tasks, cache).await;
         error!(
             namespace = %options.namespace,
             config_map = %options.name,
             key = %options.key,
             error = %err,
-            "failed to apply desired-state ConfigMap update; keeping last good tasks"
+            "failed to apply desired-state ConfigMap update; cleared probe tasks and paused probing"
         );
     }
 }
@@ -118,4 +121,37 @@ async fn reconcile_configmap(
     );
 
     Ok(())
+}
+
+async fn clear_probe_state(tasks: &SharedTasks, cache: &SharedCache) {
+    tasks.write().await.clear();
+    cache.write().await.clear();
+}
+
+async fn log_initial_configmap_state(
+    configmaps: &Api<ConfigMap>,
+    options: &ConfigMapWatchOptions,
+    tasks: &SharedTasks,
+    cache: &SharedCache,
+) {
+    match configmaps.get(&options.name).await {
+        Ok(_) => {}
+        Err(kube::Error::Api(response)) if response.code == 404 => {
+            clear_probe_state(tasks, cache).await;
+            warn!(
+                namespace = %options.namespace,
+                config_map = %options.name,
+                key = %options.key,
+                "desired-state ConfigMap does not exist; probing is paused until it is created"
+            );
+        }
+        Err(err) => {
+            warn!(
+                namespace = %options.namespace,
+                config_map = %options.name,
+                error = %err,
+                "could not check desired-state ConfigMap before starting watch"
+            );
+        }
+    }
 }

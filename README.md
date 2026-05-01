@@ -7,7 +7,7 @@ the latest results on a local HTTP port.
 
 ## What It Does
 
-- Watches `pingpongkong-{K8S_CLUSTERNAME}-ping-state` in `K8S_NAMESPACE`.
+- Watches `pingpongkong-{CONFIG_GIT_CLUSTERNAME}-ping-state` in `K8S_NAMESPACE`.
 - Reads desired ping state YAML from the ConfigMap key `desiredPingState.yaml`.
 - Resolves topology roles to Kubernetes node `InternalIP` addresses.
 - Detects the role of the node running the current agent pod from `NODE_NAME`.
@@ -71,7 +71,7 @@ External endpoints must use `host:port` form.
 | Variable | Default | Description |
 | --- | --- | --- |
 | `K8S_NAMESPACE` | service account namespace | Namespace containing the desired-state ConfigMap. |
-| `K8S_CLUSTERNAME` | required | Cluster name used to derive `pingpongkong-{K8S_CLUSTERNAME}-ping-state`. |
+| `CONFIG_GIT_CLUSTERNAME` | required | Cluster name used to derive `pingpongkong-{CONFIG_GIT_CLUSTERNAME}-ping-state`. |
 | `CONFIGMAP_KEY` | `desiredPingState.yaml` | Data key containing the desired ping state YAML. |
 | `NODE_NAME` | required | Kubernetes node name for the current pod. Inject from `spec.nodeName`. |
 | `LOG_LEVEL` | `INFO` | Log verbosity. One of `TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`. |
@@ -147,7 +147,7 @@ env:
     valueFrom:
       fieldRef:
         fieldPath: metadata.namespace
-  - name: K8S_CLUSTERNAME
+  - name: CONFIG_GIT_CLUSTERNAME
     value: sample-k8s-cluster
   - name: NODE_NAME
     valueFrom:
@@ -179,7 +179,7 @@ Run locally for a smoke test:
 ```bash
 docker run --rm -p 8080:8080 \
   -e K8S_NAMESPACE=default \
-  -e K8S_CLUSTERNAME=sample-k8s-cluster \
+  -e CONFIG_GIT_CLUSTERNAME=sample-k8s-cluster \
   -e NODE_NAME=test-node \
   pingpongkong-k8s-agent:local
 ```

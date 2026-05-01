@@ -45,7 +45,7 @@ impl AppConfig {
 impl ConfigMapWatchOptions {
     fn from_env() -> anyhow::Result<Self> {
         let cluster_name = required_env(
-            "K8S_CLUSTERNAME",
+            "CONFIG_GIT_CLUSTERNAME",
             "set it to the PingPongKong cluster name used by Helm",
         )?;
 
@@ -150,7 +150,10 @@ fn namespace_from_env_or_service_account() -> anyhow::Result<String> {
 
 fn ping_state_configmap_name(cluster_name: &str) -> anyhow::Result<String> {
     let cluster_name = cluster_name.trim();
-    anyhow::ensure!(!cluster_name.is_empty(), "K8S_CLUSTERNAME cannot be empty");
+    anyhow::ensure!(
+        !cluster_name.is_empty(),
+        "CONFIG_GIT_CLUSTERNAME cannot be empty"
+    );
     Ok(format!("pingpongkong-{cluster_name}-ping-state"))
 }
 
