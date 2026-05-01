@@ -1,4 +1,4 @@
-use crate::infra::{discover_role_ips, get_my_roles};
+use crate::infra::{discover_role_ips, get_my_roles, get_node_metadata};
 use crate::models::{DesiredPingState, ProbeTask, parse_endpoint};
 use kube::Client;
 use std::collections::HashSet;
@@ -13,7 +13,8 @@ pub async fn build_probe_tasks(
         .await?
         .into_iter()
         .collect();
-    let role_ips = discover_role_ips(client, &config.topology).await?;
+    let role_ips = discover_role_ips(client.clone(), &config.topology).await?;
+    let (_, node_ip_address) = get_node_metadata(client.clone(), node_name).await?;
     let mut tasks = Vec::new();
 
     for rule in &config.matrix.internal {
@@ -27,13 +28,17 @@ pub async fn build_probe_tasks(
 
         for target in target_ips {
             for port in &rule.ports {
-                tasks.push(ProbeTask::new(
+                tasks.push(mark_self_probe(
+                    ProbeTask::new(
+                        target.clone(),
+                        *port,
+                        rule.protocol.as_str().to_string(),
+                        rule.from.clone(),
+                        rule.to.clone(),
+                        rule.action,
+                    ),
                     target.clone(),
-                    *port,
-                    rule.protocol.as_str().to_string(),
-                    rule.from.clone(),
-                    rule.to.clone(),
-                    rule.action,
+                    &node_ip_address,
                 ));
             }
         }
@@ -45,13 +50,17 @@ pub async fn build_probe_tasks(
         }
 
         let (target, port) = parse_endpoint(&rule.endpoint)?;
-        tasks.push(ProbeTask::new(
+        tasks.push(mark_self_probe(
+            ProbeTask::new(
+                target.clone(),
+                port,
+                rule.protocol.as_str().to_string(),
+                rule.from.clone(),
+                rule.name.clone().unwrap_or_else(|| rule.endpoint.clone()),
+                rule.action,
+            ),
             target,
-            port,
-            rule.protocol.as_str().to_string(),
-            rule.from.clone(),
-            rule.name.clone().unwrap_or_else(|| rule.endpoint.clone()),
-            rule.action,
+            &node_ip_address,
         ));
     }
 
@@ -59,4 +68,12 @@ pub async fn build_probe_tasks(
     tasks.dedup();
 
     Ok(tasks)
+}
+
+fn mark_self_probe(task: ProbeTask, target_ip: String, node_ip: &str) -> ProbeTask {
+    if target_ip == node_ip {
+        task.with_message("does not test self to self")
+    } else {
+        task
+    }
 }

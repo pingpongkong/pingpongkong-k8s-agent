@@ -15,6 +15,7 @@ pub struct ProbeTask {
     pub source_role: String,
     pub target_name: String,
     pub action: PingRuleAction,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -29,6 +30,7 @@ pub struct ProbeResult {
     pub target_name: String,
     pub port: u16,
     pub action: PingRuleAction,
+    pub message: String,
 }
 
 impl ProbeTask {
@@ -48,7 +50,13 @@ impl ProbeTask {
             source_role,
             target_name,
             action,
+            message: String::new(),
         }
+    }
+
+    pub fn with_message(mut self, message: impl Into<String>) -> Self {
+        self.message = message.into();
+        self
     }
 
     /// Builds the stable cache key used to deduplicate tasks and store results.
@@ -74,10 +82,15 @@ impl ProbeResult {
             target_name: task.target_name.clone(),
             port: task.port,
             action: task.action,
+            message: task.message.clone(),
         }
     }
 
     pub fn target_health_status(&self) -> TargetHealthStatus {
+        if !self.message.is_empty() {
+            return TargetHealthStatus::Healthy;
+        }
+
         match (self.expected_success, self.success) {
             (true, true) | (false, false) => TargetHealthStatus::Healthy,
             (true, false) => TargetHealthStatus::Unreachable,
@@ -86,6 +99,10 @@ impl ProbeResult {
     }
 
     pub fn error_message(&self) -> Option<String> {
+        if !self.message.is_empty() {
+            return Some(self.message.clone());
+        }
+
         match (self.expected_success, self.success) {
             (true, false) => Some("target was unreachable".to_string()),
             (false, true) => Some("target was reachable but rule action is deny".to_string()),

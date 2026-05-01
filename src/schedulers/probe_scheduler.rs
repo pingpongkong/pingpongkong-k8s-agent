@@ -109,6 +109,10 @@ pub async fn run_all_probes(
 /// Executes one probe task and converts its result into the shared cache format.
 async fn run_single_probe(task: &ProbeTask, timeout_duration: Duration) -> ProbeResult {
     let start = Instant::now();
+    if !task.message.is_empty() {
+        return ProbeResult::from_task(task, true, 0, unix_timestamp());
+    }
+
     let success = match task.protocol.as_str() {
         "tcp" => probe_tcp(&task.target, task.port, timeout_duration).await,
         "udp" => probe_udp(&task.target, task.port, timeout_duration).await,
