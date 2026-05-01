@@ -1,5 +1,9 @@
 use anyhow::Context;
+use std::fs;
 use std::time::Duration;
+
+const SERVICE_ACCOUNT_NAMESPACE_PATH: &str =
+    "/var/run/secrets/kubernetes.io/serviceaccount/namespace";
 
 #[derive(Clone, Debug)]
 pub struct AppConfig {
@@ -33,15 +37,27 @@ impl AppConfig {
             log_level: LogLevel::from_env("LOG_LEVEL")?,
             agent_check_interval: duration_from_env("AGENT_CHECK_INTERVAL", "5m")?,
             agent_api_port: port_from_env("AGENT_API_PORT", 8080)?,
-            config_map: ConfigMapWatchOptions {
-                namespace: std::env::var("CONFIG_NAMESPACE")
-                    .unwrap_or_else(|_| "default".to_string()),
-                name: std::env::var("CONFIGMAP_NAME")
-                    .unwrap_or_else(|_| "pingpongkong-matrix".to_string()),
-                key: std::env::var("CONFIGMAP_KEY")
-                    .unwrap_or_else(|_| "desiredPingState.yaml".to_string()),
-                node_name: required_env("NODE_NAME")?,
-            },
+            config_map: ConfigMapWatchOptions::from_env()?,
+        })
+    }
+}
+
+impl ConfigMapWatchOptions {
+    fn from_env() -> anyhow::Result<Self> {
+        let cluster_name = required_env(
+            "K8S_CLUSTERNAME",
+            "set it to the PingPongKong cluster name used by Helm",
+        )?;
+
+        Ok(Self {
+            namespace: namespace_from_env_or_service_account()?,
+            name: ping_state_configmap_name(&cluster_name)?,
+            key: std::env::var("CONFIGMAP_KEY")
+                .unwrap_or_else(|_| "desiredPingState.yaml".to_string()),
+            node_name: required_env(
+                "NODE_NAME",
+                "set it from the Kubernetes Downward API field spec.nodeName",
+            )?,
         })
     }
 }
@@ -111,9 +127,39 @@ fn port_from_env(name: &str, default: u16) -> anyhow::Result<u16> {
     Ok(port)
 }
 
-fn required_env(name: &str) -> anyhow::Result<String> {
-    std::env::var(name)
-        .with_context(|| format!("{name} is required; set it to the Kubernetes node name"))
+fn namespace_from_env_or_service_account() -> anyhow::Result<String> {
+    match std::env::var("K8S_NAMESPACE") {
+        Ok(namespace) if !namespace.trim().is_empty() => Ok(namespace),
+        Ok(_) => anyhow::bail!("K8S_NAMESPACE cannot be empty"),
+        Err(_) => fs::read_to_string(SERVICE_ACCOUNT_NAMESPACE_PATH)
+            .map(|namespace| namespace.trim().to_string())
+            .with_context(|| {
+                format!(
+                    "K8S_NAMESPACE is required when service account namespace file {SERVICE_ACCOUNT_NAMESPACE_PATH} is unavailable"
+                )
+            })
+            .and_then(|namespace| {
+                anyhow::ensure!(
+                    !namespace.is_empty(),
+                    "service account namespace file {SERVICE_ACCOUNT_NAMESPACE_PATH} is empty"
+                );
+                Ok(namespace)
+            }),
+    }
+}
+
+fn ping_state_configmap_name(cluster_name: &str) -> anyhow::Result<String> {
+    let cluster_name = cluster_name.trim();
+    anyhow::ensure!(!cluster_name.is_empty(), "K8S_CLUSTERNAME cannot be empty");
+    Ok(format!("pingpongkong-{cluster_name}-ping-state"))
+}
+
+fn required_env(name: &str, guidance: &str) -> anyhow::Result<String> {
+    match std::env::var(name) {
+        Ok(value) if !value.trim().is_empty() => Ok(value),
+        Ok(_) => anyhow::bail!("{name} cannot be empty"),
+        Err(_) => anyhow::bail!("{name} is required; {guidance}"),
+    }
 }
 
 #[cfg(test)]
@@ -132,5 +178,13 @@ mod tests {
         assert!(parse_duration("30").is_err());
         assert!(parse_duration("0s").is_err());
         assert!(parse_duration("5d").is_err());
+    }
+
+    #[test]
+    fn builds_cluster_configmap_name() {
+        assert_eq!(
+            ping_state_configmap_name("sample-k8s-cluster").unwrap(),
+            "pingpongkong-sample-k8s-cluster-ping-state"
+        );
     }
 }

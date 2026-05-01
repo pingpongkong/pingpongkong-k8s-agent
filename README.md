@@ -1,13 +1,13 @@
 # PingPongKong Kubernetes Agent
 
 `pingpongkong-k8s-agent` is the node-local execution agent for PingPongKong.
-It runs as a Kubernetes DaemonSet, watches a matrix ConfigMap with native
-Kubernetes RBAC, expands that matrix into TCP, UDP, and ICMP probes, and exposes
+It runs as a Kubernetes DaemonSet, watches a desired-state ConfigMap with native
+Kubernetes RBAC, expands that matrix into TCP and UDP probes, and exposes
 the latest results on a local HTTP port.
 
 ## What It Does
 
-- Watches a ConfigMap, by default `default/pingpongkong-matrix`.
+- Watches `pingpongkong-{K8S_CLUSTERNAME}-ping-state` in `K8S_NAMESPACE`.
 - Reads desired ping state YAML from the ConfigMap key `desiredPingState.yaml`.
 - Resolves topology roles to Kubernetes node `InternalIP` addresses.
 - Detects the role of the node running the current agent pod from `NODE_NAME`.
@@ -22,7 +22,7 @@ the latest results on a local HTTP port.
 The agent does not need a Git token. Configuration is delivered through
 Kubernetes itself:
 
-1. Another component updates the matrix ConfigMap.
+1. Another component updates the desired-state ConfigMap.
 2. The agent's service account watches that ConfigMap.
 3. On each update, the agent validates the YAML and expands it into probe tasks.
 4. Probe results are stored in memory and refreshed every probe cycle.
@@ -70,8 +70,8 @@ External endpoints must use `host:port` form.
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `CONFIG_NAMESPACE` | `default` | Namespace containing the matrix ConfigMap. |
-| `CONFIGMAP_NAME` | `pingpongkong-matrix` | Name of the watched ConfigMap. |
+| `K8S_NAMESPACE` | service account namespace | Namespace containing the desired-state ConfigMap. |
+| `K8S_CLUSTERNAME` | required | Cluster name used to derive `pingpongkong-{K8S_CLUSTERNAME}-ping-state`. |
 | `CONFIGMAP_KEY` | `desiredPingState.yaml` | Data key containing the desired ping state YAML. |
 | `NODE_NAME` | required | Kubernetes node name for the current pod. Inject from `spec.nodeName`. |
 | `LOG_LEVEL` | `INFO` | Log verbosity. One of `TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`. |
@@ -111,7 +111,7 @@ and local inspection.
 
 ## Kubernetes Permissions
 
-The agent service account needs:
+RBAC is expected to be created by the Helm chart. The agent service account needs:
 
 - `get`, `list`, `watch` on ConfigMaps in the configured namespace.
 - `get`, `list` on Nodes cluster-wide.
@@ -143,6 +143,12 @@ The DaemonSet should inject `NODE_NAME`:
 
 ```yaml
 env:
+  - name: K8S_NAMESPACE
+    valueFrom:
+      fieldRef:
+        fieldPath: metadata.namespace
+  - name: K8S_CLUSTERNAME
+    value: sample-k8s-cluster
   - name: NODE_NAME
     valueFrom:
       fieldRef:
@@ -172,6 +178,8 @@ Run locally for a smoke test:
 
 ```bash
 docker run --rm -p 8080:8080 \
+  -e K8S_NAMESPACE=default \
+  -e K8S_CLUSTERNAME=sample-k8s-cluster \
   -e NODE_NAME=test-node \
   pingpongkong-k8s-agent:local
 ```
