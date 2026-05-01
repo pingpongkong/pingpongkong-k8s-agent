@@ -43,7 +43,7 @@ impl NodeStatus {
     ) -> Self {
         let targets = results
             .into_iter()
-            .map(TargetStatus::from)
+            .map(|result| TargetStatus::from_probe_result(result, &ip_address))
             .collect::<Vec<_>>();
         let health_status = if targets
             .iter()
@@ -64,16 +64,28 @@ impl NodeStatus {
     }
 }
 
-impl From<ProbeResult> for TargetStatus {
-    fn from(result: ProbeResult) -> Self {
+impl TargetStatus {
+    fn from_probe_result(result: ProbeResult, node_ip_address: &str) -> Self {
         let health_status = result.target_health_status();
         let error_message = result.error_message();
+        let latency_ms = u64::try_from(result.latency_ms).ok();
+        let target_ip_address = result.target;
+
+        if target_ip_address.trim() == node_ip_address.trim() {
+            return Self {
+                target_name: result.target_name,
+                target_ip_address,
+                health_status: TargetHealthStatus::Healthy,
+                latency_ms: Some(0),
+                error_message: Some("does not test self to self".to_string()),
+            };
+        }
 
         Self {
             target_name: result.target_name,
-            target_ip_address: result.target,
+            target_ip_address,
             health_status,
-            latency_ms: u64::try_from(result.latency_ms).ok(),
+            latency_ms,
             error_message,
         }
     }

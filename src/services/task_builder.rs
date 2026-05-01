@@ -71,7 +71,7 @@ pub async fn build_probe_tasks(
 }
 
 fn mark_self_probe(task: ProbeTask, target_ip: String, node_ip: &str) -> ProbeTask {
-    if target_ip == node_ip {
+    if target_ip.trim() == node_ip.trim() {
         task.with_message("does not test self to self")
     } else {
         task
