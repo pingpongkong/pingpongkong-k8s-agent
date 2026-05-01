@@ -67,7 +67,7 @@ async fn main() -> anyhow::Result<()> {
     info!(
         bind_address = %bind_address,
         port = config.agent_api_port,
-        endpoints = "/, /status, /metrics, /state",
+        endpoints = "/, /node-status, /status, /metrics, /state",
         "agent HTTP API listening"
     );
 

@@ -82,9 +82,11 @@ External endpoints must use `host:port` form.
 
 ## HTTP Endpoints
 
-### `GET /` or `GET /status`
+### `GET /node-status`
 
 Returns the node status shape consumed by the collector.
+
+`GET /` and `GET /status` return the same response for local debugging.
 
 ### `GET /metrics`
 

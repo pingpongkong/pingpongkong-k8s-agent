@@ -33,6 +33,7 @@ impl AppState {
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/", get(node_status_handler))
+        .route("/node-status", get(node_status_handler))
         .route("/status", get(node_status_handler))
         .route("/metrics", get(metrics_handler))
         .route("/state", get(state_handler))
