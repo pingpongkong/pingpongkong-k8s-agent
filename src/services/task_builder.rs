@@ -1,14 +1,13 @@
-use super::discovery::{discover_role_ips, get_my_roles};
-use crate::config::{AgentConfig, parse_endpoint};
-use crate::probe::ProbeTask;
+use crate::infra::{discover_role_ips, get_my_roles};
+use crate::models::{DesiredPingState, ProbeTask, parse_endpoint};
 use kube::Client;
 use std::collections::HashSet;
 
-/// Expands the current matrix and node role into concrete probe tasks.
+/// Expands the current desired state and node role into concrete probe tasks.
 pub async fn build_probe_tasks(
     client: Client,
     node_name: &str,
-    config: &AgentConfig,
+    config: &DesiredPingState,
 ) -> anyhow::Result<Vec<ProbeTask>> {
     let my_roles: HashSet<String> = get_my_roles(client.clone(), node_name, &config.topology)
         .await?
@@ -31,9 +30,10 @@ pub async fn build_probe_tasks(
                 tasks.push(ProbeTask::new(
                     target.clone(),
                     *port,
-                    rule.proto.clone(),
+                    rule.protocol.as_str().to_string(),
                     rule.from.clone(),
                     rule.to.clone(),
+                    rule.action,
                 ));
             }
         }
@@ -48,9 +48,10 @@ pub async fn build_probe_tasks(
         tasks.push(ProbeTask::new(
             target,
             port,
-            rule.proto.clone(),
+            rule.protocol.as_str().to_string(),
             rule.from.clone(),
-            rule.name.clone(),
+            rule.name.clone().unwrap_or_else(|| rule.endpoint.clone()),
+            rule.action,
         ));
     }
 

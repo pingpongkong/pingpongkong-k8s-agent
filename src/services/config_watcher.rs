@@ -1,6 +1,6 @@
-use super::task_builder::build_probe_tasks;
-use crate::config::AgentConfig;
-use crate::probe::{ProbeTask, SharedCache, SharedTasks};
+use super::build_probe_tasks;
+use crate::configs::ConfigMapWatchOptions;
+use crate::models::{DesiredPingState, ProbeTask, SharedCache, SharedTasks};
 use futures::StreamExt;
 use k8s_openapi::api::core::v1::ConfigMap;
 use kube::{
@@ -10,29 +10,9 @@ use kube::{
 };
 use std::collections::HashSet;
 use tokio::time::{Duration, sleep};
+use tracing::{error, info, warn};
 
-#[derive(Clone, Debug)]
-pub struct ConfigMapWatchOptions {
-    pub namespace: String,
-    pub name: String,
-    pub key: String,
-    pub node_name: String,
-}
-
-impl ConfigMapWatchOptions {
-    /// Creates ConfigMap watch options from Kubernetes-friendly environment variables.
-    pub fn from_env() -> anyhow::Result<Self> {
-        Ok(Self {
-            namespace: std::env::var("CONFIG_NAMESPACE").unwrap_or_else(|_| "default".to_string()),
-            name: std::env::var("CONFIGMAP_NAME")
-                .unwrap_or_else(|_| "pingpongkong-matrix".to_string()),
-            key: std::env::var("CONFIGMAP_KEY").unwrap_or_else(|_| "matrix.yaml".to_string()),
-            node_name: std::env::var("NODE_NAME")?,
-        })
-    }
-}
-
-/// Watches the matrix ConfigMap and keeps the shared desired task set up to date.
+/// Watches the desired-state ConfigMap and keeps the shared task set up to date.
 pub async fn run_config_watcher(
     options: ConfigMapWatchOptions,
     tasks: SharedTasks,
@@ -45,26 +25,34 @@ pub async fn run_config_watcher(
 
     loop {
         let mut stream = watcher(configmaps.clone(), watcher_config.clone()).boxed();
-        println!(
-            "watching ConfigMap {}/{} key {}",
-            options.namespace, options.name, options.key
+        info!(
+            namespace = %options.namespace,
+            config_map = %options.name,
+            key = %options.key,
+            node_name = %options.node_name,
+            "watching desired-state ConfigMap"
         );
 
         while let Some(event) = stream.next().await {
             match event {
-                Ok(Event::Applied(configmap)) => {
+                Ok(Event::Apply(configmap) | Event::InitApply(configmap)) => {
                     apply_configmap_update(&client, &options, &configmap, &tasks, &cache).await;
                 }
-                Ok(Event::Restarted(configmaps)) => {
-                    for configmap in configmaps {
-                        apply_configmap_update(&client, &options, &configmap, &tasks, &cache).await;
-                    }
+                Ok(Event::Delete(_)) => {
+                    warn!(
+                        namespace = %options.namespace,
+                        config_map = %options.name,
+                        "desired-state ConfigMap was deleted; keeping last good task set"
+                    );
                 }
-                Ok(Event::Deleted(_)) => {
-                    println!("watched ConfigMap was deleted; keeping last good task set");
-                }
+                Ok(Event::Init | Event::InitDone) => {}
                 Err(err) => {
-                    eprintln!("ConfigMap watch error; restarting watch stream: {err:#}");
+                    error!(
+                        namespace = %options.namespace,
+                        config_map = %options.name,
+                        error = %err,
+                        "ConfigMap watch failed; retrying in 2s"
+                    );
                     break;
                 }
             }
@@ -83,7 +71,13 @@ async fn apply_configmap_update(
     cache: &SharedCache,
 ) {
     if let Err(err) = reconcile_configmap(client, options, configmap, tasks, cache).await {
-        eprintln!("failed to apply ConfigMap update; keeping last good tasks: {err:#}");
+        error!(
+            namespace = %options.namespace,
+            config_map = %options.name,
+            key = %options.key,
+            error = %err,
+            "failed to apply desired-state ConfigMap update; keeping last good tasks"
+        );
     }
 }
 
@@ -103,7 +97,7 @@ async fn reconcile_configmap(
         anyhow::bail!("ConfigMap is missing key {}", options.key);
     };
 
-    let config = AgentConfig::load_from_str(raw_config)?;
+    let config = DesiredPingState::load_from_str(raw_config)?;
     let next_tasks = build_probe_tasks(client.clone(), &options.node_name, &config).await?;
     let task_count = next_tasks.len();
     let next_task_keys: HashSet<String> = next_tasks.iter().map(ProbeTask::cache_key).collect();
@@ -114,9 +108,13 @@ async fn reconcile_configmap(
         .await
         .retain(|cache_key, _| next_task_keys.contains(cache_key));
 
-    println!(
-        "loaded config for cluster {} with {task_count} probe tasks",
-        config.cluster
+    info!(
+        cluster = %config.cluster,
+        version = %config.version,
+        task_count,
+        internal_rules = config.matrix.internal.len(),
+        external_rules = config.matrix.external.len(),
+        "accepted desired ping state from ConfigMap"
     );
 
     Ok(())

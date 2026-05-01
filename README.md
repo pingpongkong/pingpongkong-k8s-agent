@@ -8,7 +8,7 @@ the latest results on a local HTTP port.
 ## What It Does
 
 - Watches a ConfigMap, by default `default/pingpongkong-matrix`.
-- Reads the matrix YAML from the ConfigMap key `matrix.yaml`.
+- Reads desired ping state YAML from the ConfigMap key `desiredPingState.yaml`.
 - Resolves topology roles to Kubernetes node `InternalIP` addresses.
 - Detects the role of the node running the current agent pod from `NODE_NAME`.
 - Runs only the probes that apply to this node's role.
@@ -33,10 +33,10 @@ Kubernetes itself:
 The ConfigMap data value must be YAML matching this shape:
 
 ```yaml
-version: v1
+version: "1.0"
 cluster: example-cluster
 topology:
-  roles:
+  node-labels:
     controlplane: node-role.kubernetes.io/control-plane
     worker: node-role.kubernetes.io/worker
 matrix:
@@ -44,23 +44,25 @@ matrix:
     - from: worker
       to: controlplane
       ports: [6443]
-      proto: tcp
+      protocol: tcp
+      action: allow
     - from: controlplane
       to: worker
       ports: [10250]
-      proto: tcp
+      protocol: tcp
+      action: deny
   external:
     - name: dns-google
       from: worker
       endpoint: 8.8.8.8:53
-      proto: udp
+      protocol: udp
+      action: allow
 ```
 
 Supported protocols:
 
 - `tcp`
 - `udp`
-- `icmp`
 
 External endpoints must use `host:port` form.
 
@@ -70,13 +72,19 @@ External endpoints must use `host:port` form.
 | --- | --- | --- |
 | `CONFIG_NAMESPACE` | `default` | Namespace containing the matrix ConfigMap. |
 | `CONFIGMAP_NAME` | `pingpongkong-matrix` | Name of the watched ConfigMap. |
-| `CONFIGMAP_KEY` | `matrix.yaml` | Data key containing the matrix YAML. |
+| `CONFIGMAP_KEY` | `desiredPingState.yaml` | Data key containing the desired ping state YAML. |
 | `NODE_NAME` | required | Kubernetes node name for the current pod. Inject from `spec.nodeName`. |
-| `PROBE_INTERVAL_SECONDS` | `15` | Delay between probe cycles. |
+| `LOG_LEVEL` | `INFO` | Log verbosity. One of `TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`. |
+| `AGENT_CHECK_INTERVAL` | `5m` | Delay between probe cycles. Examples: `30s`, `5m`, `1h`. |
+| `AGENT_API_PORT` | `8080` | HTTP API port used by the collector and metrics scrapers. |
 | `PROBE_TIMEOUT_MILLISECONDS` | `3000` | Timeout for each probe attempt. |
 | `PROBE_MAX_CONCURRENCY` | `512` | Maximum concurrent probe tasks per cycle. |
 
 ## HTTP Endpoints
+
+### `GET /` or `GET /status`
+
+Returns the node status shape consumed by the collector.
 
 ### `GET /metrics`
 
@@ -184,17 +192,11 @@ cargo build --release --locked
 ```text
 src/
   main.rs                  # Process entrypoint and task startup.
-  server.rs                # Axum HTTP routes for metrics and JSON state.
-  config/
-    mod.rs
-    schema.rs              # Matrix schema, parsing, and validation.
-  kubernetes/
-    mod.rs
-    discovery.rs           # Node role and InternalIP discovery.
-    task_builder.rs        # Matrix-to-probe task expansion.
-    watcher.rs             # ConfigMap watch and reconciliation.
-  probe/
-    mod.rs
-    runner.rs              # Bounded-concurrency probe engine.
-    types.rs               # Probe task/result shared types.
+  configs/                 # Environment-backed runtime config.
+  controllers/             # Axum HTTP controllers.
+  errors/                  # Application error module.
+  infra/                   # Kubernetes discovery and node metadata.
+  models/                  # Split desired-state, probe, and API models.
+  schedulers/              # Recurring probe scheduler.
+  services/                # ConfigMap watch and task-building services.
 ```

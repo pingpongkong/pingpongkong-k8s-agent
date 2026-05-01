@@ -1,3 +1,4 @@
+use super::{PingRuleAction, TargetHealthStatus};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -13,11 +14,13 @@ pub struct ProbeTask {
     pub protocol: String,
     pub source_role: String,
     pub target_name: String,
+    pub action: PingRuleAction,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ProbeResult {
     pub success: bool,
+    pub expected_success: bool,
     pub latency_ms: u128,
     pub last_probe_unix_seconds: u64,
     pub protocol: String,
@@ -25,6 +28,7 @@ pub struct ProbeResult {
     pub target: String,
     pub target_name: String,
     pub port: u16,
+    pub action: PingRuleAction,
 }
 
 impl ProbeTask {
@@ -35,6 +39,7 @@ impl ProbeTask {
         protocol: String,
         source_role: String,
         target_name: String,
+        action: PingRuleAction,
     ) -> Self {
         Self {
             target,
@@ -42,14 +47,15 @@ impl ProbeTask {
             protocol,
             source_role,
             target_name,
+            action,
         }
     }
 
     /// Builds the stable cache key used to deduplicate tasks and store results.
     pub fn cache_key(&self) -> String {
         format!(
-            "{}-{}-{}-{}-{}",
-            self.protocol, self.source_role, self.target_name, self.target, self.port
+            "{}-{}-{}-{}-{}-{:?}",
+            self.protocol, self.source_role, self.target_name, self.target, self.port, self.action
         )
     }
 }
@@ -59,6 +65,7 @@ impl ProbeResult {
     pub fn from_task(task: &ProbeTask, success: bool, latency_ms: u128, timestamp: u64) -> Self {
         Self {
             success,
+            expected_success: task.action.expected_success(),
             latency_ms,
             last_probe_unix_seconds: timestamp,
             protocol: task.protocol.clone(),
@@ -66,6 +73,23 @@ impl ProbeResult {
             target: task.target.clone(),
             target_name: task.target_name.clone(),
             port: task.port,
+            action: task.action,
+        }
+    }
+
+    pub fn target_health_status(&self) -> TargetHealthStatus {
+        match (self.expected_success, self.success) {
+            (true, true) | (false, false) => TargetHealthStatus::Healthy,
+            (true, false) => TargetHealthStatus::Unreachable,
+            (false, true) => TargetHealthStatus::Failed,
+        }
+    }
+
+    pub fn error_message(&self) -> Option<String> {
+        match (self.expected_success, self.success) {
+            (true, false) => Some("target was unreachable".to_string()),
+            (false, true) => Some("target was reachable but rule action is deny".to_string()),
+            _ => None,
         }
     }
 }

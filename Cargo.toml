@@ -6,20 +6,24 @@ edition = "2024"
 [dependencies]
 # Web Server (Axum) & Async Runtime (Tokio)
 axum = "0.8.9"
-tokio = { version = "1.36", features = ["full"] }
+tokio = { version = "1.52.1", features = ["full"] }
 
 # Serialization (Parsing your YAML ConfigMap)
-serde = { version = "1.0", features = ["derive"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0"
 serde_yaml = "0.9"
+chrono = { version = "0.4", features = ["serde"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Kubernetes API (To convert those "roles" into real IP addresses)
-kube = { version = "0.90", features = ["runtime", "derive"] }
-k8s-openapi = { version = "0.21", features = ["v1_29"] }
+kube = { version = "3.1.0", features = ["runtime", "derive"] }
+k8s-openapi = { version = "0.27.1", features = ["v1_31"] }
 
 # Metrics & State Sharing
-prometheus = "0.13"
-lazy_static = "1.4"
+prometheus = "0.14.0"
+lazy_static = "1.5.0"
 
-anyhow = "1.0"
-surge-ping = "0.8"
-futures = "0.3" # For join_all
+anyhow = "1.0.102"
+surge-ping = "0.8.4"
+futures = "0.3.32" # For join_all

@@ -1,41 +1,68 @@
-use super::{ProbeResult, ProbeTask, SharedCache, SharedTasks};
+use crate::models::{ProbeResult, ProbeTask, SharedCache, SharedTasks, TargetHealthStatus};
 use futures::{StreamExt, stream::FuturesUnordered};
 use std::net::IpAddr;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use surge_ping::{Client, Config, PingIdentifier, PingSequence};
 use tokio::net::{TcpStream, UdpSocket};
 use tokio::sync::Semaphore;
-use tokio::time::{Duration, Instant, sleep, timeout};
+use tokio::time::{Instant, sleep, timeout};
+use tracing::{error, info};
+
+#[derive(Default)]
+pub struct ProbeBatchSummary {
+    pub total: usize,
+    pub healthy: usize,
+    pub unreachable: usize,
+    pub failed: usize,
+}
 
 /// Runs the recurring probe cycle using the latest desired task snapshot.
-pub async fn run_probe_loop(tasks: SharedTasks, cache: SharedCache) {
-    let interval = env_u64("PROBE_INTERVAL_SECONDS", 15);
+pub async fn run_probe_loop(tasks: SharedTasks, cache: SharedCache, interval: Duration) {
     let timeout_duration = Duration::from_millis(env_u64("PROBE_TIMEOUT_MILLISECONDS", 3000));
     let max_concurrency = env_usize("PROBE_MAX_CONCURRENCY", 512).max(1);
+    info!(
+        interval = %format_duration(interval),
+        timeout_ms = timeout_duration.as_millis(),
+        max_concurrency,
+        "probe scheduler started"
+    );
 
     loop {
         let current_tasks = tasks.read().await.clone();
 
         if current_tasks.is_empty() {
-            println!("no probe tasks loaded yet");
-        } else {
-            println!(
-                "starting probe cycle with {} tasks and max concurrency {}",
-                current_tasks.len(),
-                max_concurrency
+            info!(
+                next_check_in = %format_duration(interval),
+                "no probe tasks loaded yet; waiting for desired state"
             );
-            run_all_probes(
+        } else {
+            let task_count = current_tasks.len();
+            info!(
+                task_count,
+                max_concurrency,
+                timeout_ms = timeout_duration.as_millis(),
+                "starting probe cycle"
+            );
+            let summary = run_all_probes(
                 current_tasks,
                 Arc::clone(&cache),
                 timeout_duration,
                 max_concurrency,
             )
             .await;
+            info!(
+                task_count = summary.total,
+                healthy = summary.healthy,
+                unreachable = summary.unreachable,
+                failed = summary.failed,
+                next_check_in = %format_duration(interval),
+                "probe cycle completed"
+            );
         }
 
-        sleep(Duration::from_secs(interval)).await;
+        sleep(interval).await;
     }
 }
 
@@ -45,9 +72,10 @@ pub async fn run_all_probes(
     cache: SharedCache,
     timeout_duration: Duration,
     max_concurrency: usize,
-) {
+) -> ProbeBatchSummary {
     let semaphore = Arc::new(Semaphore::new(max_concurrency));
     let mut pending = FuturesUnordered::new();
+    let mut summary = ProbeBatchSummary::default();
 
     for task in tasks {
         let cache_ref = Arc::clone(&cache);
@@ -55,19 +83,27 @@ pub async fn run_all_probes(
 
         pending.push(tokio::spawn(async move {
             let Ok(_permit) = semaphore_ref.acquire_owned().await else {
-                return;
+                return None;
             };
 
             let result = run_single_probe(&task, timeout_duration).await;
-            cache_ref.write().await.insert(task.cache_key(), result);
+            cache_ref
+                .write()
+                .await
+                .insert(task.cache_key(), result.clone());
+            Some(result)
         }));
     }
 
     while let Some(join_result) = pending.next().await {
-        if let Err(err) = join_result {
-            eprintln!("probe task join error: {err}");
+        match join_result {
+            Ok(Some(result)) => summary.record(&result),
+            Ok(None) => {}
+            Err(err) => error!(error = %err, "probe task join error"),
         }
     }
+
+    summary
 }
 
 /// Executes one probe task and converts its result into the shared cache format.
@@ -76,7 +112,6 @@ async fn run_single_probe(task: &ProbeTask, timeout_duration: Duration) -> Probe
     let success = match task.protocol.as_str() {
         "tcp" => probe_tcp(&task.target, task.port, timeout_duration).await,
         "udp" => probe_udp(&task.target, task.port, timeout_duration).await,
-        "icmp" => probe_icmp(&task.target, timeout_duration).await,
         _ => false,
     };
 
@@ -105,6 +140,7 @@ async fn probe_udp(target: &str, port: u16, timeout_duration: Duration) -> bool 
     )
 }
 
+#[allow(dead_code)]
 /// Checks whether an ICMP echo succeeds before the timeout.
 async fn probe_icmp(target: &str, timeout_duration: Duration) -> bool {
     let Ok(ip) = IpAddr::from_str(target) else {
@@ -148,4 +184,29 @@ fn unix_timestamp() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or_default()
+}
+
+impl ProbeBatchSummary {
+    fn record(&mut self, result: &ProbeResult) {
+        self.total += 1;
+        match result.target_health_status() {
+            TargetHealthStatus::Healthy => self.healthy += 1,
+            TargetHealthStatus::Unreachable => self.unreachable += 1,
+            TargetHealthStatus::Failed => self.failed += 1,
+        }
+    }
+}
+
+fn format_duration(duration: Duration) -> String {
+    let seconds = duration.as_secs();
+
+    if seconds == 0 {
+        format!("{}ms", duration.as_millis())
+    } else if seconds % 3600 == 0 {
+        format!("{}h", seconds / 3600)
+    } else if seconds % 60 == 0 {
+        format!("{}m", seconds / 60)
+    } else {
+        format!("{seconds}s")
+    }
 }
