@@ -14,8 +14,8 @@ the latest results on a local HTTP port.
 - Runs only the probes that apply to this node's role.
 - Keeps the last good task set when a bad ConfigMap update is received.
 - Restarts the ConfigMap watch stream after watch errors.
-- Exposes Prometheus metrics at `:8080/metrics`.
-- Exposes JSON debug state at `:8080/state`.
+- Exposes Prometheus metrics at `:30090/metrics`.
+- Exposes JSON debug state at `:30090/state`.
 
 ## Runtime Model
 
@@ -76,7 +76,7 @@ External endpoints must use `host:port` form.
 | `NODE_NAME` | required | Kubernetes node name for the current pod. Inject from `spec.nodeName`. |
 | `LOG_LEVEL` | `INFO` | Log verbosity. One of `TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`. |
 | `AGENT_CHECK_INTERVAL` | `5m` | Delay between probe cycles. Examples: `30s`, `5m`, `1h`. |
-| `AGENT_API_PORT` | `8080` | HTTP API port used by the collector and metrics scrapers. |
+| `AGENT_API_PORT` | `30090` | HTTP API port used by the collector and metrics scrapers. |
 | `PROBE_TIMEOUT_MILLISECONDS` | `3000` | Timeout for each probe attempt. |
 | `PROBE_MAX_CONCURRENCY` | `512` | Maximum concurrent probe tasks per cycle. |
 
@@ -179,7 +179,7 @@ docker build -t pingpongkong-k8s-agent:local .
 Run locally for a smoke test:
 
 ```bash
-docker run --rm -p 8080:8080 \
+docker run --rm -p 30090:30090 \
   -e K8S_NAMESPACE=default \
   -e CONFIG_GIT_CLUSTERNAME=sample-k8s-cluster \
   -e NODE_NAME=test-node \

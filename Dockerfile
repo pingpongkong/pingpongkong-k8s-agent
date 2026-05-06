@@ -18,6 +18,6 @@ RUN useradd --system --uid 10001 --create-home --home-dir /home/agent agent
 COPY --from=builder /app/target/release/pingpongkong-k8s-agent /usr/local/bin/pingpongkong-k8s-agent
 
 USER 10001
-EXPOSE 8080
+EXPOSE 30090
 
 ENTRYPOINT ["/usr/local/bin/pingpongkong-k8s-agent"]

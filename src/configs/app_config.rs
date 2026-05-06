@@ -36,7 +36,7 @@ impl AppConfig {
         Ok(Self {
             log_level: LogLevel::from_env("LOG_LEVEL")?,
             agent_check_interval: duration_from_env("AGENT_CHECK_INTERVAL", "5m")?,
-            agent_api_port: port_from_env("AGENT_API_PORT", 8080)?,
+            agent_api_port: port_from_env("AGENT_API_PORT", 30090)?,
             config_map: ConfigMapWatchOptions::from_env()?,
         })
     }
